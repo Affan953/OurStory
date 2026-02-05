@@ -476,6 +476,7 @@ async function undoPhotoDeletion() {
     renderPhotos();
     renderVideos();
     renderStories();
+    renderTimeline(); // NEW: Update timeline immediately
 
     return true;
 }
@@ -707,6 +708,7 @@ function setupEventListeners() {
 
                     // Refresh gallery
                     renderPhotos();
+                    renderTimeline(); // NEW: Update timeline immediately
                     filterPhotos('all', 'all');
 
                     // Switch to gallery view
@@ -733,6 +735,7 @@ function setupEventListeners() {
                     showNotification('Story saved successfully!', 'success');
                     resetStoryForm();
                     renderStories();
+                    renderTimeline(); // NEW: Update timeline immediately
                     setTimeout(() => setActiveNav('gallery'), 500);
                 } else {
                     showNotification('Error saving story', 'error');
@@ -754,6 +757,7 @@ function setupEventListeners() {
                     showNotification('Video saved successfully!', 'success');
                     resetVideoForm();
                     renderVideos();
+                    renderTimeline(); // NEW: Update timeline immediately
                     setTimeout(() => setActiveNav('gallery'), 500);
                 } else {
                     showNotification('Error saving video', 'error');
@@ -1312,49 +1316,168 @@ function renderGreetings() {
     });
 }
 
+// NEW: dynamic timeline data aggregation
+function getTimelineData() {
+    // 1. Combine all data sources
+    const allPhotos = [...userPhotos, ...samplePhotos];
+    const allVideos = [...userVideos, ...sampleVideos];
+    const allStories = [...userStories, ...sampleStories];
+
+    // 2. Filter out deleted items
+    const visiblePhotos = allPhotos.filter(item => !deletedIds.includes((item.id || 'sample-' + item.id).toString()));
+    const visibleVideos = allVideos.filter(item => !deletedIds.includes((item.id || 'sample-v-' + item.id).toString()));
+    const visibleStories = allStories.filter(item => !deletedIds.includes((item.id || 'sample-s-' + item.id).toString()));
+
+    // 3. Group by year
+    const yearsMap = new Map();
+
+    // Helper to add year if not exists
+    const ensureYear = (year) => {
+        if (!yearsMap.has(year)) {
+            yearsMap.set(year, {
+                year: year,
+                photos: 0,
+                videos: 0,
+                stories: 0,
+                // These will be determined later
+                title: `Eid ${year}`,
+                highlight: "Memories collected from this blessed year."
+            });
+        }
+        return yearsMap.get(year);
+    };
+
+    visiblePhotos.forEach(p => ensureYear(p.year).photos++);
+    visibleVideos.forEach(v => ensureYear(v.year).videos++);
+    visibleStories.forEach(s => ensureYear(s.year).stories++);
+
+    // 4. Convert to array and sort (newest year first)
+    const timelineData = Array.from(yearsMap.values()).sort((a, b) => b.year - a.year);
+
+    // 5. Enrich with titles/highlights
+    // We want to keep original titles/highlights for sample years to maintain the storytelling aspect
+    const sampleYearDefaults = {
+        "2024": { title: "Eid of Reunion", highlight: "First full family gathering since the pandemic" },
+        "2023": { title: "Eid of Gratitude", highlight: "Thankful for health and togetherness" },
+        "2022": { title: "Eid of Hope", highlight: "Celebrating with renewed hope for the future" },
+        "2021": { title: "Virtual Eid", highlight: "Connected through screens but close at heart" },
+        "2020": { title: "Quiet Eid", highlight: "Simple celebrations with immediate family" }
+    };
+
+    timelineData.forEach(item => {
+        if (sampleYearDefaults[item.year]) {
+            item.title = sampleYearDefaults[item.year].title;
+            item.highlight = sampleYearDefaults[item.year].highlight;
+        } else {
+            // Logic for new years
+            // Try to find a story title from this year to use as highlight
+            const storyFromYear = visibleStories.find(s => s.year === item.year);
+            if (storyFromYear) {
+                item.highlight = storyFromYear.title;
+            }
+        }
+    });
+
+    return timelineData;
+}
+
 function renderTimeline() {
     if (!timelineContainer) return;
 
     timelineContainer.innerHTML = '';
 
-    sampleTimeline.forEach((item, index) => {
+    // Add a central vertical line for desktop view
+    const centerLine = document.createElement('div');
+    centerLine.className = 'hidden md:block absolute left-1/2 top-0 bottom-0 w-1 bg-gradient-to-b from-green-200 via-green-400 to-green-200 transform -translate-x-1/2 rounded-full -z-10';
+    timelineContainer.appendChild(centerLine);
+
+    // GET DYNAMIC DATA
+    const timelineData = getTimelineData();
+
+    if (timelineData.length === 0) {
+        timelineContainer.innerHTML = '<div class="text-center py-12 text-gray-500">No timeline memories yet. Add some memories to see your journey!</div>';
+        return;
+    }
+
+    timelineData.forEach((item, index) => {
         const isEven = index % 2 === 0;
 
         const timelineItem = document.createElement('div');
-        timelineItem.className = `flex ${isEven ? 'flex-row' : 'flex-row-reverse'} items-center mb-12`;
+        timelineItem.className = `relative flex flex-col md:flex-row items-center mb-16 md:mb-24 w-full group`;
 
-        timelineItem.innerHTML = `
-                    <div class="w-1/2 ${isEven ? 'pr-12 text-right' : 'pl-12'}">
-                        <div class="memory-card bg-white p-6 rounded-2xl shadow-md inline-block">
-                            <h4 class="text-xl font-bold text-gray-800 mb-2">Eid ${item.year}</h4>
-                            <p class="text-gray-700 mb-4">${item.title}</p>
-                            <p class="text-gray-600 text-sm mb-4">${item.highlight}</p>
-                            <div class="flex ${isEven ? 'justify-end' : 'justify-start'} space-x-2">
-                                <span class="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm">
-                                    <i class="fas fa-image mr-1" aria-hidden="true"></i> ${item.photos}
-                                </span>
-                                <span class="px-3 py-1 bg-amber-100 text-amber-800 rounded-full text-sm">
-                                    <i class="fas fa-book-open mr-1" aria-hidden="true"></i> ${item.stories}
-                                </span>
-                                <span class="px-3 py-1 bg-purple-100 text-purple-800 rounded-full text-sm">
-                                    <i class="fas fa-video mr-1" aria-hidden="true"></i> ${item.videos}
-                                </span>
-                            </div>
-                        </div>
+        // Marker (Year Bubble)
+        const marker = `
+            <div class="order-1 md:order-2 w-full md:w-2/12 flex justify-center py-4 md:py-0 relative z-10">
+                <div class="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-br from-green-600 to-green-800 rounded-full flex items-center justify-center text-white font-bold shadow-xl border-4 border-white ring-4 ring-green-100 transform transition-transform duration-300 group-hover:scale-110">
+                    <div class="flex flex-col items-center">
+                        <span class="text-xs md:text-xs opacity-80 uppercase tracking-widest font-light">Eid</span>
+                        <span class="text-base md:text-xl leading-none">${item.year}</span>
                     </div>
-                    <div class="relative w-8 flex justify-center">
-                        <div class="w-8 h-8 bg-gradient-to-r from-green-600 to-green-700 rounded-full flex items-center justify-center text-white font-bold z-10">
-                            ${item.year.substring(2)}
-                        </div>
-                        <div class="absolute top-8 bottom-0 w-1 bg-gradient-to-b from-green-600 to-transparent"></div>
-                    </div>
-                    <div class="w-1/2 ${isEven ? 'pl-12' : 'pr-12'}">
-                        <div class="h-40 bg-gradient-to-r ${isEven ? 'from-green-100 to-amber-100' : 'from-amber-100 to-green-100'} rounded-xl flex items-center justify-center">
-                            <i class="fas fa-star text-4xl ${isEven ? 'text-amber-500' : 'text-green-500'}" aria-hidden="true"></i>
-                        </div>
-                    </div>
-                `;
+                </div>
+            </div>
+        `;
 
+        // Content Card
+        const contentCard = `
+            <div class="bg-white p-6 md:p-8 rounded-3xl shadow-lg border border-gray-100 hover:shadow-2xl transition-all duration-300 transform group-hover:-translate-y-1 relative overflow-hidden h-full">
+                <div class="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-green-50 to-transparent rounded-bl-full opacity-60"></div>
+                
+                <div class="relative z-10">
+                    <div class="flex items-center gap-3 mb-3">
+                        <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-xs font-bold tracking-wide uppercase">Highlight</span>
+                        <div class="h-px bg-gray-200 flex-1"></div>
+                    </div>
+                    
+                    <h4 class="text-2xl font-bold text-gray-800 mb-2 font-serif">${item.title}</h4>
+                    <p class="text-gray-600 mb-6 leading-relaxed">${item.highlight}</p>
+                    
+                    <div class="flex flex-wrap gap-2 text-sm font-medium text-gray-500 bg-gray-50 p-3 rounded-xl border border-gray-100">
+                        <span class="flex items-center px-2">
+                            <i class="fas fa-image mr-2 text-green-500" aria-hidden="true"></i> ${item.photos} Photos
+                        </span>
+                        <span class="flex items-center px-2">
+                            <i class="fas fa-book-open mr-2 text-amber-500" aria-hidden="true"></i> ${item.stories} Stories
+                        </span>
+                        <span class="flex items-center px-2">
+                            <i class="fas fa-video mr-2 text-purple-500" aria-hidden="true"></i> ${item.videos} Videos
+                        </span>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Visual (Image/Pattern)
+        const visual = `
+            <div class="h-56 md:h-64 rounded-3xl overflow-hidden shadow-lg border-4 border-white relative group-hover:shadow-xl transition-all duration-300 w-full">
+                <div class="absolute inset-0 bg-gradient-to-br ${isEven ? 'from-green-600 to-emerald-800' : 'from-amber-500 to-orange-600'} opacity-90 transition-opacity duration-500 group-hover:opacity-100"></div>
+                <!-- Simple pattern overlay -->
+                <div class="absolute inset-0 opacity-10" style="background-image: radial-gradient(circle, white 2px, transparent 2.5px); background-size: 20px 20px;"></div>
+                
+                <div class="absolute inset-0 flex items-center justify-center">
+                    <div class="text-center p-6 text-white transform transition-transform duration-500 group-hover:scale-110">
+                        <div class="w-16 h-16 mx-auto bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mb-4">
+                            <i class="fas ${isEven ? 'fa-mosque' : 'fa-star-and-crescent'} text-3xl" aria-hidden="true"></i>
+                        </div>
+                        <p class="font-serif text-lg italic opacity-90">"Memories of ${item.year}"</p>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        // Determine Layout
+        let leftCol, rightCol;
+
+        if (isEven) {
+            // Even: Content Left, Visual Right on Desktop
+            leftCol = `<div class="order-2 md:order-1 w-full md:w-5/12 px-4 md:pl-0 md:pr-12 mb-6 md:mb-0 md:text-right">${contentCard}</div>`;
+            rightCol = `<div class="order-3 md:order-3 w-full md:w-5/12 px-4 md:pr-0 md:pl-12 mb-6 md:mb-0">${visual}</div>`;
+        } else {
+            // Odd: Visual Left, Content Right on Desktop
+            leftCol = `<div class="order-3 md:order-1 w-full md:w-5/12 px-4 md:px-0 md:pr-12 mb-6 md:mb-0">${visual}</div>`;
+            rightCol = `<div class="order-2 md:order-3 w-full md:w-5/12 px-4 md:px-0 md:pl-12 mb-6 md:mb-0 md:text-left">${contentCard}</div>`;
+        }
+
+        timelineItem.innerHTML = leftCol + marker + rightCol;
         timelineContainer.appendChild(timelineItem);
     });
 }
@@ -1857,6 +1980,7 @@ async function confirmDeleteFromToast() {
                 renderPhotos();
                 renderVideos();
                 renderStories();
+                renderTimeline(); // NEW: Update timeline immediately
 
                 // Show undo notification
                 showUndoNotification(title);
