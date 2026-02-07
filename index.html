@@ -92,15 +92,8 @@
             </button>
         </div>
         
-        <!-- Scroll indicator -->
-        <div class="absolute bottom-10 left-1/2 transform -translate-x-1/2 fade-in" style="animation-delay: 2s;">
-            <div class="flex flex-col items-center">
-                <span class="text-gray-700 text-sm mb-2">Scroll to explore</span>
-                <div class="w-6 h-10 border-2 border-gray-600 rounded-full flex justify-center">
-                    <div class="w-1 h-3 bg-gray-600 rounded-full mt-2 animate-bounce"></div>
-                </div>
-            </div>
-        </div>
+
+
     </section>
 
     <!-- Welcome / Opening Story -->
@@ -427,20 +420,42 @@
                             <p id="modal-description" class="text-gray-700 leading-relaxed"></p>
                         </div>
                         
-                        <div class="bg-gray-50 p-4 rounded-lg">
-                            <h5 class="font-bold text-gray-700 mb-2">Memory Details</h5>
-                            <div class="space-y-2">
-                                <div class="flex">
-                                    <span class="text-gray-600 w-24">Date:</span>
-                                    <span id="modal-date" class="text-gray-800"></span>
+                        <div class="bg-gradient-to-br from-green-50 to-amber-50 rounded-2xl p-6 border border-green-100 shadow-sm">
+                            <h5 class="text-sm uppercase tracking-widest text-green-700 font-bold mb-5 flex items-center">
+                                <span class="w-8 h-px bg-green-200 mr-3"></span>
+                                Memory Specs
+                                <span class="w-8 h-px bg-green-200 ml-3"></span>
+                            </h5>
+                            
+                            <div class="space-y-4">
+                                <div class="flex items-center group">
+                                    <div class="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-green-600 mr-4 transition-transform group-hover:scale-110">
+                                        <i class="fas fa-calendar-day"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-gray-500 font-medium">Capture Date</p>
+                                        <p id="modal-date" class="text-gray-800 font-bold"></p>
+                                    </div>
                                 </div>
-                                <div class="flex">
-                                    <span class="text-gray-600 w-24">Location:</span>
-                                    <span id="modal-location" class="text-gray-800"></span>
+                                
+                                <div class="flex items-center group">
+                                    <div class="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-amber-500 mr-4 transition-transform group-hover:scale-110">
+                                        <i class="fas fa-map-marker-alt"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-gray-500 font-medium">Memory Location</p>
+                                        <p id="modal-location" class="text-gray-800 font-bold"></p>
+                                    </div>
                                 </div>
-                                <div class="flex">
-                                    <span class="text-gray-600 w-24">Emotion:</span>
-                                    <span id="modal-emotion" class="text-gray-800"></span>
+                                
+                                <div class="flex items-center group">
+                                    <div class="w-10 h-10 bg-white rounded-xl shadow-sm flex items-center justify-center text-rose-500 mr-4 transition-transform group-hover:scale-110">
+                                        <i class="fas fa-heart"></i>
+                                    </div>
+                                    <div>
+                                        <p class="text-xs text-gray-500 font-medium">Dominant Emotion</p>
+                                        <p id="modal-emotion" class="text-gray-800 font-bold"></p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -561,11 +576,17 @@
     </footer>
 
     <!-- Audio for background music -->
-    <audio id="background-music" loop>
-        <!-- In a real implementation, you would link to actual audio files -->
-        <!-- <source src="takbir.mp3" type="audio/mpeg"> -->
-        <!-- For this example, we'll just have a silent audio placeholder -->
+    <!-- Background Music (Simple Audio) -->
+    <audio id="background-music" loop preload="auto">
+        <!-- Multiple sources for high reliability -->
+        <source src="https://ia600100.us.archive.org/21/items/RamadhanTiba/Opick-RamadhanTiba.mp3" type="audio/mpeg">
+        <source src="https://ia801006.us.archive.org/32/items/TakbeeratEid/TakbeeratEid.mp3" type="audio/mpeg">
+        <source src="https://ia801604.us.archive.org/19/items/islamic-nasheed-background/Islamic%20Background%20Nasheed.mp3" type="audio/mpeg">
+        <source src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3" type="audio/mpeg">
+        Your browser does not support the audio element.
     </audio>
-<script src="script.js"></script>
+    <input type="file" id="local-music-upload" accept="audio/*" class="hidden">
+
+    <script src="script.js"></script>
 </body>
 </html>

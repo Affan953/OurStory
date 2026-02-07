@@ -13,6 +13,20 @@ const backToTopBtn = document.getElementById('back-to-top');
 const addFromFooterBtn = document.getElementById('add-from-footer');
 const musicToggle = document.getElementById('music-toggle');
 const backgroundMusic = document.getElementById('background-music');
+let musicPlaying = false;
+
+function updateMusicToggleUI() {
+    if (!musicToggle) return;
+    if (musicPlaying) {
+        musicToggle.innerHTML = '<i class="fas fa-volume-up text-xl"></i>';
+        musicToggle.classList.remove('text-gray-600', 'animate-pulse');
+        musicToggle.classList.add('text-green-700', 'music-pulse');
+    } else {
+        musicToggle.innerHTML = '<i class="fas fa-music text-xl"></i>';
+        musicToggle.classList.remove('text-green-700', 'music-pulse', 'animate-pulse');
+        musicToggle.classList.add('text-gray-600');
+    }
+}
 
 const navItems = document.querySelectorAll('.nav-item');
 const sectionContents = document.querySelectorAll('.section-content');
@@ -90,7 +104,6 @@ let currentSection = 'gallery';
 let currentPhotoIndex = 0;
 let slideshowInterval;
 let isSlideshowPlaying = true;
-let musicPlaying = false;
 
 // NEW: Delete state variables
 let photoToDelete = null;
@@ -268,7 +281,7 @@ function generateId() {
 }
 
 // Compress image before saving to stay within localStorage limits (approx 5MB)
-function compressImage(file, maxWidth = 1280, quality = 0.7) {
+function compressImage(file, maxWidth = 1920, quality = 0.85) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = (e) => {
@@ -423,7 +436,8 @@ async function deleteMemoryFromStorage(memoryId) {
     // 2. Check User Videos
     const videoIndex = userVideos.findIndex(v => v.id.toString() === idStr);
     if (videoIndex !== -1) {
-        deletedPhoto = userVideos[videoIndex]; // Re-using variable for simplicity
+        deletedPhoto = userVideos[videoIndex];
+        deletedPhoto.isVideo = true; // Flag for undo
         deletedPhotoIndex = videoIndex;
         userVideos.splice(videoIndex, 1);
         await DbManager.delete(STORES.VIDEOS, memoryId);
@@ -433,19 +447,34 @@ async function deleteMemoryFromStorage(memoryId) {
     // 3. Check User Stories
     const storyIndex = userStories.findIndex(s => s.id.toString() === idStr);
     if (storyIndex !== -1) {
-        deletedPhoto = userStories[storyIndex]; // Re-using variable for simplicity
+        deletedPhoto = userStories[storyIndex];
+        deletedPhoto.isStory = true; // Flag for undo
         deletedPhotoIndex = storyIndex;
         userStories.splice(storyIndex, 1);
         await DbManager.delete(STORES.STORIES, memoryId);
         return true;
     }
 
-    // 4. Check Sample Photos/Videos/Stories (already added to deletedIds)
-    const allSamples = [...samplePhotos, ...sampleVideos, ...sampleStories];
-    const sample = allSamples.find(p => (p.id || `sample-${p.id}`).toString() === idStr);
-    if (sample) {
-        deletedPhoto = sample;
+    // 4. Check Sample Photos/Videos/Stories
+    const samplePhoto = samplePhotos.find(p => ('sample-p-' + p.id).toString() === idStr);
+    if (samplePhoto) {
+        deletedPhoto = samplePhoto;
         deletedPhotoIndex = -1;
+        return true;
+    }
+    const sampleVideo = sampleVideos.find(v => ('sample-v-' + v.id).toString() === idStr);
+    if (sampleVideo) {
+        deletedPhoto = sampleVideo;
+        deletedPhoto.isVideo = true;
+        deletedPhotoIndex = -1;
+        return true;
+    }
+    const sampleStory = sampleStories.find(s => ('sample-s-' + s.id).toString() === idStr);
+    if (sampleStory) {
+        deletedPhoto = sampleStory;
+        deletedPhoto.isStory = true;
+        deletedPhotoIndex = -1;
+        return true;
     }
 
     return true;
@@ -453,19 +482,23 @@ async function deleteMemoryFromStorage(memoryId) {
 
 // Undo photo deletion
 async function undoPhotoDeletion() {
-    if (!deletedPhoto) return false;
-
-    const photoId = (deletedPhoto.id || 'sample-' + deletedPhoto.id).toString();
-
     // Remove from persistent deleted list
-    deletedIds = deletedIds.filter(id => id.toString() !== photoId);
-    await DbManager.delete(STORES.DELETED, photoId);
+    const photoId = deletedPhoto.isUserUpload ? deletedPhoto.id : (deletedPhoto.isStory ? 'sample-s-' : deletedPhoto.isVideo ? 'sample-v-' : 'sample-p-') + deletedPhoto.id;
+
+    deletedIds = deletedIds.filter(id => id.toString() !== photoId.toString());
+    await DbManager.delete(STORES.DELETED, photoId.toString());
 
     if (deletedPhoto.isUserUpload) {
-        // Add the photo back to the user array
-        userPhotos.splice(deletedPhotoIndex, 0, deletedPhoto);
-        // Save back to DB
-        await DbManager.save(STORES.PHOTOS, deletedPhoto);
+        if (deletedPhoto.isStory) {
+            userStories.splice(deletedPhotoIndex, 0, deletedPhoto);
+            await DbManager.save(STORES.STORIES, deletedPhoto);
+        } else if (deletedPhoto.isVideo) {
+            userVideos.splice(deletedPhotoIndex, 0, deletedPhoto);
+            await DbManager.save(STORES.VIDEOS, deletedPhoto);
+        } else {
+            userPhotos.splice(deletedPhotoIndex, 0, deletedPhoto);
+            await DbManager.save(STORES.PHOTOS, deletedPhoto);
+        }
     }
 
     // Clear the undo data
@@ -476,7 +509,7 @@ async function undoPhotoDeletion() {
     renderPhotos();
     renderVideos();
     renderStories();
-    renderTimeline(); // NEW: Update timeline immediately
+    renderTimeline(); // RESTORED: Update timeline immediately
 
     return true;
 }
@@ -708,7 +741,7 @@ function setupEventListeners() {
 
                     // Refresh gallery
                     renderPhotos();
-                    renderTimeline(); // NEW: Update timeline immediately
+                    renderTimeline(); // RESTORED: Update timeline immediately
                     filterPhotos('all', 'all');
 
                     // Switch to gallery view
@@ -735,7 +768,7 @@ function setupEventListeners() {
                     showNotification('Story saved successfully!', 'success');
                     resetStoryForm();
                     renderStories();
-                    renderTimeline(); // NEW: Update timeline immediately
+                    renderTimeline(); // RESTORED: Update timeline immediately
                     setTimeout(() => setActiveNav('gallery'), 500);
                 } else {
                     showNotification('Error saving story', 'error');
@@ -757,7 +790,7 @@ function setupEventListeners() {
                     showNotification('Video saved successfully!', 'success');
                     resetVideoForm();
                     renderVideos();
-                    renderTimeline(); // NEW: Update timeline immediately
+                    renderTimeline(); // RESTORED: Update timeline immediately
                     setTimeout(() => setActiveNav('gallery'), 500);
                 } else {
                     showNotification('Error saving video', 'error');
@@ -841,10 +874,6 @@ function setupEventListeners() {
         slideshowNextBtn.addEventListener('click', nextSlideshowImage);
     }
 
-    // Music toggle
-    if (musicToggle) {
-        musicToggle.addEventListener('click', toggleMusic);
-    }
 
     // Close modals when clicking outside
     window.addEventListener('click', (e) => {
@@ -883,12 +912,12 @@ function setupEventListeners() {
             const allPhotos = [...userPhotos, ...samplePhotos];
             // Filtering deleted photos to get the correct absolute photo
             const visiblePhotos = allPhotos.filter(photo => {
-                const photoId = photo.id || 'sample-' + photo.id;
+                const photoId = photo.isUserUpload ? photo.id : 'sample-p-' + photo.id;
                 return !deletedIds.includes(photoId.toString());
             });
             const photo = visiblePhotos[currentPhotoIndex];
             if (photo) {
-                const photoId = photo.id || 'sample-' + photo.id;
+                const photoId = photo.isUserUpload ? photo.id : 'sample-p-' + photo.id;
                 photoModal.classList.add('hidden');
                 showDeleteToast(photoId, currentPhotoIndex, photo.title);
             }
@@ -925,24 +954,41 @@ function setupEventListeners() {
     });
 }
 
+// NEW: Music upload element
+const localMusicUpload = document.getElementById('local-music-upload');
+
 function setupMusic() {
-    // In a real implementation, you would load actual audio
-    // For this demo, we'll just simulate it
-    if (musicToggle) {
-        musicToggle.addEventListener('click', function () {
-            if (musicPlaying) {
-                // backgroundMusic.pause();
-                musicToggle.innerHTML = '<i class="fas fa-music text-xl"></i>';
-                musicToggle.classList.remove('text-green-700');
-                musicToggle.classList.add('text-gray-600');
-            } else {
-                // backgroundMusic.play();
-                musicToggle.innerHTML = '<i class="fas fa-volume-up text-xl"></i>';
-                musicToggle.classList.remove('text-gray-600');
-                musicToggle.classList.add('text-green-700');
-            }
-            musicPlaying = !musicPlaying;
-        });
+    if (musicToggle && backgroundMusic) {
+        musicToggle.onclick = toggleMusic;
+
+        backgroundMusic.onplay = () => {
+            musicPlaying = true;
+            updateMusicToggleUI();
+        };
+        backgroundMusic.onpause = () => {
+            musicPlaying = false;
+            updateMusicToggleUI();
+        };
+
+        backgroundMusic.onerror = () => {
+            showNotification("File musik gagal dimuat.", "error");
+            musicPlaying = false;
+            updateMusicToggleUI();
+        };
+
+        // Handle local music upload fallback
+        const localMusicUpload = document.getElementById('local-music-upload');
+        if (localMusicUpload) {
+            localMusicUpload.onchange = (e) => {
+                const file = e.target.files[0];
+                if (file) {
+                    const objectUrl = URL.createObjectURL(file);
+                    backgroundMusic.src = objectUrl;
+                    backgroundMusic.play();
+                    showNotification("Musik lokal berhasil dimuat!", "success");
+                }
+            };
+        }
     }
 }
 
@@ -993,7 +1039,7 @@ function renderPhotos() {
 
     // Filter out deleted photos
     const visiblePhotos = allPhotos.filter(photo => {
-        const photoId = photo.id || 'sample-' + photo.id;
+        const photoId = photo.isUserUpload ? photo.id : 'sample-p-' + photo.id;
         return !deletedIds.includes(photoId.toString());
     });
 
@@ -1003,7 +1049,7 @@ function renderPhotos() {
         photoCard.setAttribute('data-index', index);
         photoCard.setAttribute('data-year', photo.year);
         photoCard.setAttribute('data-category', photo.category);
-        photoCard.setAttribute('data-id', photo.id || 'sample-' + photo.id);
+        photoCard.setAttribute('data-id', photo.isUserUpload ? photo.id : 'sample-p-' + photo.id);
 
         // Generate placeholder image based on category
         const colors = {
@@ -1078,8 +1124,8 @@ function renderPhotos() {
     document.querySelectorAll('.view-details').forEach(btn => {
         btn.addEventListener('click', function (e) {
             e.stopPropagation();
-            const index = parseInt(this.getAttribute('data-index'));
-            openPhotoModal(index);
+            const photoId = this.closest('.memory-card').getAttribute('data-id');
+            openPhotoModal(photoId);
         });
     });
 
@@ -1090,8 +1136,8 @@ function renderPhotos() {
             if (e.target.closest('.trash-icon')) {
                 return;
             }
-            const index = parseInt(this.getAttribute('data-index'));
-            openPhotoModal(index);
+            const photoId = this.getAttribute('data-id');
+            openPhotoModal(photoId);
         });
     });
 
@@ -1123,17 +1169,17 @@ function renderVideos() {
 
     // Filter out deleted videos
     const visibleVideos = allVideos.filter(video => {
-        const videoId = video.id || 'sample-v-' + video.id;
+        const videoId = video.isUserUpload ? video.id : 'sample-v-' + video.id;
         return !deletedIds.includes(videoId.toString());
     });
 
     visibleVideos.forEach((video, index) => {
         const videoCard = document.createElement('div');
         videoCard.className = 'memory-card bg-white rounded-xl overflow-hidden shadow-md hover:shadow-xl transition-all duration-300 cursor-pointer relative';
-        videoCard.setAttribute('data-id', video.id || 'sample-v-' + video.id);
+        videoCard.setAttribute('data-id', video.isUserUpload ? video.id : 'sample-v-' + video.id);
 
         let videoContent = '';
-        if (video.isUserUpload && video.video) {
+        if (video.isUserUpload && video.url) {
             videoContent = `
                         <div class="h-48 bg-gradient-to-r from-purple-100 to-pink-100 flex items-center justify-center relative overflow-hidden">
                             <div class="w-full h-full bg-gray-900 flex items-center justify-center">
@@ -1204,7 +1250,7 @@ function renderStories() {
 
     // Filter out deleted stories
     const visibleStories = allStories.filter(story => {
-        const storyId = story.id || 'sample-s-' + story.id;
+        const storyId = story.isUserUpload ? story.id : 'sample-s-' + story.id;
         return !deletedIds.includes(storyId.toString());
     });
 
@@ -1225,7 +1271,7 @@ function renderStories() {
 
         const storyCard = document.createElement('div');
         storyCard.className = 'memory-card bg-white p-6 rounded-2xl shadow-md hover:shadow-lg transition-all duration-300 relative';
-        storyCard.setAttribute('data-id', story.id || 'sample-s-' + story.id);
+        storyCard.setAttribute('data-id', story.isUserUpload ? story.id : 'sample-s-' + story.id);
 
         const emotionBg = emotionColors[story.emotion] || 'bg-gray-100 text-gray-800';
         const userBadge = story.isUserUpload ? '<span class="px-2 py-1 bg-blue-500 text-white text-xs rounded-full font-bold ml-2">Your Story</span>' : '';
@@ -1324,9 +1370,9 @@ function getTimelineData() {
     const allStories = [...userStories, ...sampleStories];
 
     // 2. Filter out deleted items
-    const visiblePhotos = allPhotos.filter(item => !deletedIds.includes((item.id || 'sample-' + item.id).toString()));
-    const visibleVideos = allVideos.filter(item => !deletedIds.includes((item.id || 'sample-v-' + item.id).toString()));
-    const visibleStories = allStories.filter(item => !deletedIds.includes((item.id || 'sample-s-' + item.id).toString()));
+    const visiblePhotos = allPhotos.filter(item => !deletedIds.includes((item.isUserUpload ? item.id : 'sample-p-' + item.id).toString()));
+    const visibleVideos = allVideos.filter(item => !deletedIds.includes((item.isUserUpload ? item.id : 'sample-v-' + item.id).toString()));
+    const visibleStories = allStories.filter(item => !deletedIds.includes((item.isUserUpload ? item.id : 'sample-s-' + item.id).toString()));
 
     // 3. Group by year
     const yearsMap = new Map();
@@ -1448,17 +1494,19 @@ function renderTimeline() {
 
         // Visual (Image/Pattern)
         const visual = `
-            <div class="h-56 md:h-64 rounded-3xl overflow-hidden shadow-lg border-4 border-white relative group-hover:shadow-xl transition-all duration-300 w-full">
-                <div class="absolute inset-0 bg-gradient-to-br ${isEven ? 'from-green-600 to-emerald-800' : 'from-amber-500 to-orange-600'} opacity-90 transition-opacity duration-500 group-hover:opacity-100"></div>
-                <!-- Simple pattern overlay -->
-                <div class="absolute inset-0 opacity-10" style="background-image: radial-gradient(circle, white 2px, transparent 2.5px); background-size: 20px 20px;"></div>
+            <div class="h-56 md:h-64 rounded-3xl overflow-hidden shadow-xl border-4 border-white relative group-hover:shadow-2xl transition-all duration-300 w-full flex-shrink-0">
+                <!-- Uniform Premium Gradient Background -->
+                <div class="absolute inset-0 bg-gradient-to-br from-green-600 to-emerald-800 opacity-100 transition-transform duration-500 group-hover:scale-105"></div>
+                
+                <!-- Pattern overlay -->
+                <div class="absolute inset-0 opacity-20" style="background-image: radial-gradient(circle, white 2px, transparent 2.5px); background-size: 20px 20px;"></div>
                 
                 <div class="absolute inset-0 flex items-center justify-center">
                     <div class="text-center p-6 text-white transform transition-transform duration-500 group-hover:scale-110">
-                        <div class="w-16 h-16 mx-auto bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mb-4">
-                            <i class="fas ${isEven ? 'fa-mosque' : 'fa-star-and-crescent'} text-3xl" aria-hidden="true"></i>
+                        <div class="w-16 h-16 mx-auto bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mb-4 border border-white/30 shadow-lg">
+                            <i class="fas fa-mosque text-3xl" aria-hidden="true"></i>
                         </div>
-                        <p class="font-serif text-lg italic opacity-90">"Memories of ${item.year}"</p>
+                        <p class="font-serif text-lg italic opacity-95 tracking-wide">"Memories of ${item.year}"</p>
                     </div>
                 </div>
             </div>
@@ -1473,7 +1521,13 @@ function renderTimeline() {
             rightCol = `<div class="order-3 md:order-3 w-full md:w-5/12 px-4 md:pr-0 md:pl-12 mb-6 md:mb-0">${visual}</div>`;
         } else {
             // Odd: Visual Left, Content Right on Desktop
+            // On mobile we keep consistent order: Content then Visual (via generic order classes)
+            // But to achieve desktop swap, we swap the variables positions in DOM
+
+            // Visual Div (Left on Desktop)
             leftCol = `<div class="order-3 md:order-1 w-full md:w-5/12 px-4 md:px-0 md:pr-12 mb-6 md:mb-0">${visual}</div>`;
+
+            // Content Div (Right on Desktop)
             rightCol = `<div class="order-2 md:order-3 w-full md:w-5/12 px-4 md:px-0 md:pl-12 mb-6 md:mb-0 md:text-left">${contentCard}</div>`;
         }
 
@@ -1675,10 +1729,14 @@ function showMemoryForm(type) {
     }
 }
 
-function openPhotoModal(index) {
+function openPhotoModal(photoId) {
     const allPhotos = [...userPhotos, ...samplePhotos];
-    const photo = allPhotos[index];
-    currentPhotoIndex = index;
+    const photo = allPhotos.find(p => (p.isUserUpload ? p.id : 'sample-p-' + p.id).toString() === photoId.toString());
+
+    if (!photo) return;
+
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+    currentPhotoIndex = visiblePhotos.indexOf(photo);
 
     // Update modal content
     document.getElementById('modal-title').textContent = photo.title;
@@ -1714,7 +1772,7 @@ function openPhotoModal(index) {
         // Display user-uploaded image
         modalImage.src = photo.image;
         modalImage.alt = `${photo.title} - Eid ${photo.year} ${photo.category} memory`;
-        modalImage.className = 'w-full h-auto rounded-lg shadow-lg max-h-96 object-cover';
+        modalImage.className = 'w-full h-auto rounded-lg shadow-2xl max-h-[75vh] object-contain bg-gray-950';
     } else {
         // Display placeholder
         modalImage.alt = `${photo.title} - Eid ${photo.year} ${photo.category} memory`;
@@ -1731,24 +1789,69 @@ function openPhotoModal(index) {
     const prevPhotoBtn = document.getElementById('prev-photo');
     const nextPhotoBtn = document.getElementById('next-photo');
 
-    if (prevPhotoBtn) prevPhotoBtn.onclick = showPrevPhoto;
-    if (nextPhotoBtn) nextPhotoBtn.onclick = showNextPhoto;
+    if (prevPhotoBtn) {
+        prevPhotoBtn.onclick = showPrevPhoto;
+        // Disable if it's the first photo
+        if (currentPhotoIndex === 0) {
+            prevPhotoBtn.disabled = true;
+            prevPhotoBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            prevPhotoBtn.classList.remove('hover:bg-gray-50');
+        } else {
+            prevPhotoBtn.disabled = false;
+            prevPhotoBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            prevPhotoBtn.classList.add('hover:bg-gray-50');
+        }
+    }
+
+    if (nextPhotoBtn) {
+        nextPhotoBtn.onclick = showNextPhoto;
+        // Disable if it's the last photo
+        if (currentPhotoIndex === visiblePhotos.length - 1) {
+            nextPhotoBtn.disabled = true;
+            nextPhotoBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            nextPhotoBtn.classList.remove('hover:bg-gray-50');
+        } else {
+            nextPhotoBtn.disabled = false;
+            nextPhotoBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            nextPhotoBtn.classList.add('hover:bg-gray-50');
+        }
+    }
 }
 
 function showPrevPhoto() {
+    if (currentPhotoIndex <= 0) return;
+
     const allPhotos = [...userPhotos, ...samplePhotos];
-    currentPhotoIndex = (currentPhotoIndex - 1 + allPhotos.length) % allPhotos.length;
-    openPhotoModal(currentPhotoIndex);
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+
+    currentPhotoIndex--;
+    const nextPhoto = visiblePhotos[currentPhotoIndex];
+    const nextId = nextPhoto.isUserUpload ? nextPhoto.id : 'sample-p-' + nextPhoto.id;
+    openPhotoModal(nextId);
 }
 
 function showNextPhoto() {
     const allPhotos = [...userPhotos, ...samplePhotos];
-    currentPhotoIndex = (currentPhotoIndex + 1) % allPhotos.length;
-    openPhotoModal(currentPhotoIndex);
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+
+    if (currentPhotoIndex >= visiblePhotos.length - 1) return;
+
+    currentPhotoIndex++;
+    const nextPhoto = visiblePhotos[currentPhotoIndex];
+    const nextId = nextPhoto.isUserUpload ? nextPhoto.id : 'sample-p-' + nextPhoto.id;
+    openPhotoModal(nextId);
 }
 
 function openSlideshow() {
     // Reset to first photo
+    const allPhotos = [...userPhotos, ...samplePhotos];
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+
+    if (visiblePhotos.length === 0) {
+        showNotification('No photos to show in slideshow', 'info');
+        return;
+    }
+
     currentPhotoIndex = 0;
     updateSlideshowImage();
 
@@ -1776,7 +1879,8 @@ function startSlideshow() {
     slideshowInterval = setInterval(() => {
         if (isSlideshowPlaying) {
             const allPhotos = [...userPhotos, ...samplePhotos];
-            currentPhotoIndex = (currentPhotoIndex + 1) % allPhotos.length;
+            const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+            currentPhotoIndex = (currentPhotoIndex + 1) % visiblePhotos.length;
             updateSlideshowImage();
         }
     }, 3000);
@@ -1809,7 +1913,8 @@ function toggleSlideshowPlayback() {
 
 function prevSlideshowImage() {
     const allPhotos = [...userPhotos, ...samplePhotos];
-    currentPhotoIndex = (currentPhotoIndex - 1 + allPhotos.length) % allPhotos.length;
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+    currentPhotoIndex = (currentPhotoIndex - 1 + visiblePhotos.length) % visiblePhotos.length;
     updateSlideshowImage();
 
     // Reset slideshow timer
@@ -1823,7 +1928,8 @@ function prevSlideshowImage() {
 
 function nextSlideshowImage() {
     const allPhotos = [...userPhotos, ...samplePhotos];
-    currentPhotoIndex = (currentPhotoIndex + 1) % allPhotos.length;
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+    currentPhotoIndex = (currentPhotoIndex + 1) % visiblePhotos.length;
     updateSlideshowImage();
 
     // Reset slideshow timer
@@ -1837,7 +1943,8 @@ function nextSlideshowImage() {
 
 function updateSlideshowImage() {
     const allPhotos = [...userPhotos, ...samplePhotos];
-    const photo = allPhotos[currentPhotoIndex];
+    const visiblePhotos = allPhotos.filter(p => !deletedIds.includes((p.isUserUpload ? p.id : 'sample-p-' + p.id).toString()));
+    const photo = visiblePhotos[currentPhotoIndex];
 
     if (!photo) return;
 
@@ -1864,10 +1971,10 @@ function updateSlideshowImage() {
     if (photo.isUserUpload && photo.image) {
         slideshowImage.src = photo.image;
         slideshowImage.alt = photo.title;
-        slideshowImage.className = 'max-w-full max-h-[60vh] rounded-lg shadow-2xl object-cover';
+        slideshowImage.className = 'max-w-full h-auto max-h-[75vh] rounded-lg shadow-2xl object-contain bg-gray-950';
         slideshowImage.innerHTML = '';
     } else {
-        slideshowImage.className = `max-w-full max-h-[60vh] rounded-lg shadow-2xl ${colors[photo.category]} flex items-center justify-center`;
+        slideshowImage.className = `max-w-full h-[75vh] rounded-lg shadow-2xl ${colors[photo.category]} flex items-center justify-center`;
         slideshowImage.innerHTML = `<i class="fas ${icons[photo.category]} text-9xl ${photo.category === 'family' ? 'text-blue-500' : photo.category === 'prayer' ? 'text-green-500' : photo.category === 'food' ? 'text-amber-500' : photo.category === 'homecoming' ? 'text-purple-500' : photo.category === 'decorations' ? 'text-pink-500' : 'text-cyan-500'}" aria-hidden="true"></i>`;
     }
 
@@ -1875,10 +1982,10 @@ function updateSlideshowImage() {
     document.getElementById('slideshow-title').textContent = photo.title;
     document.getElementById('slideshow-year').textContent = `Eid ${photo.year} • ${photo.category}`;
     document.getElementById('slideshow-counter').textContent = currentPhotoIndex + 1;
-    document.getElementById('slideshow-total').textContent = allPhotos.length;
+    document.getElementById('slideshow-total').textContent = visiblePhotos.length;
 
     // Update progress bar
-    const progress = ((currentPhotoIndex + 1) / allPhotos.length) * 100;
+    const progress = ((currentPhotoIndex + 1) / visiblePhotos.length) * 100;
     const slideshowProgress = document.getElementById('slideshow-progress');
     if (slideshowProgress) slideshowProgress.style.width = `${progress}%`;
 }
@@ -1980,7 +2087,7 @@ async function confirmDeleteFromToast() {
                 renderPhotos();
                 renderVideos();
                 renderStories();
-                renderTimeline(); // NEW: Update timeline immediately
+                renderTimeline(); // RESTORED: Update timeline immediately
 
                 // Show undo notification
                 showUndoNotification(title);
@@ -2067,16 +2174,18 @@ function showNotification(message, type) {
 }
 
 function toggleMusic() {
+    if (!backgroundMusic) return;
+
     if (musicPlaying) {
-        // backgroundMusic.pause();
-        musicToggle.innerHTML = '<i class="fas fa-music text-xl"></i>';
-        musicToggle.classList.remove('text-green-700');
-        musicToggle.classList.add('text-gray-600');
+        backgroundMusic.pause();
     } else {
-        // backgroundMusic.play();
-        musicToggle.innerHTML = '<i class="fas fa-volume-up text-xl"></i>';
-        musicToggle.classList.remove('text-gray-600');
-        musicToggle.classList.add('text-green-700');
+        backgroundMusic.play().catch(error => {
+            console.error("Audio playback failed:", error);
+            if (error.name === 'NotAllowedError') {
+                showNotification("Mohon klik di mana saja pada halaman dulu sebelum musik bisa diputar.", "info");
+            } else {
+                showNotification("Gagal memutar musik.", "error");
+            }
+        });
     }
-    musicPlaying = !musicPlaying;
 }
